@@ -23,17 +23,21 @@ package raft
 // import "bytes"
 // import "encoding/gob"
 import (
+	"bytes"
+	"encoding/gob"
 	"labrpc"
 	"sync"
 	"time"
-	// "bytes"
-	// "encoding/gob"
 )
 
 const (
 	FOLLOWER  = 0
 	CANDIDATE = 1
 	LEADER    = 2
+
+	HEARTBEAT_INTERVAL    = 50
+	MIN_ELECTION_INTERVAL = 150
+	MAX_ELECTION_INTERVAL = 300
 )
 
 //
@@ -90,6 +94,8 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here.
+	term = rf.currentTerm
+	isleader = (rf.state == LEADER)
 	return term, isleader
 }
 
@@ -107,6 +113,14 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
@@ -119,6 +133,15 @@ func (rf *Raft) readPersist(data []byte) {
 	// d := gob.NewDecoder(r)
 	// d.Decode(&rf.xxx)
 	// d.Decode(&rf.yyy)
+
+	if data == nil {
+		return
+	}
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+	d.Decode(&rf.currentTerm)
+	d.Decode(&rf.votesAcquired)
+	d.Decode(&rf.log)
 }
 
 //
@@ -126,10 +149,10 @@ func (rf *Raft) readPersist(data []byte) {
 //
 type RequestVoteArgs struct {
 	// Your data here.
-	term         int // candidate's term
-	candidateId  int // candidate requesting vote
-	lastLogIndex int // index of candidate's last log entry
-	lastLogTerm  int // term of candidate's last log entry
+	Term         int
+	CandidateId  int
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 //
@@ -137,8 +160,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here.
-	term        int  // currentTerm, for candidate to update itself
-	voteGranted bool // true means candidate received vote
+	Term        int
+	VoteGranted bool
 }
 
 //
@@ -171,18 +194,18 @@ func (rf *Raft) sendRequestVote(server int, args RequestVoteArgs, reply *Request
 }
 
 type AppendEntryArgs struct {
-	term         int
-	leaderId     int
-	prevLogIndex int
-	prevLogTerm  int
-	entries      []LogEntry
-	leaderCommit int
+	Term         int
+	LeaderId     int
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []LogEntry
+	LeaderCommit int
 }
 
 type AppendEntryReply struct {
-	term        int
-	success     bool
-	commitIndex int
+	Term        int
+	Success     bool
+	CommitIndex int
 }
 
 //
@@ -235,6 +258,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here.
+	rf.state = FOLLOWER
+	rf.applyChan = applyCh
+
+	rf.currentTerm = 0
+	rf.votedFor = -1
+	rf.log = make([]LogEntry, 0)
+	rf.commitIndex = 0
+	rf.lastApplied = 0
+	rf.nextIndex = make([]int, len(peers))
+	rf.matchIndex = make([]int, len(peers))
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
