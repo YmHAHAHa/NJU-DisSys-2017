@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"labrpc"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -222,9 +223,26 @@ type AppendEntryReply struct {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	index := -1
 	term := -1
-	isLeader := true
+	isLeader := false
+
+	if rf.state == LEADER {
+		index = len(rf.log)
+		term = rf.currentTerm
+		isLeader = true
+		rf.log = append(
+			rf.log,
+			LogEntry{
+				Index:   index,
+				Term:    term,
+				Command: command,
+			})
+		rf.persist()
+	}
 
 	return index, term, isLeader
 }
@@ -237,6 +255,78 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+}
+
+func (rf *Raft) solveVoteReply(rvreply RequestVoteReply) {
+	return
+}
+
+func (rf *Raft) changeToC() {
+	if rf.state == CANDIDATE {
+		return
+	}
+	rf.state = CANDIDATE
+	rf.currentTerm += 1
+	rf.votedFor = rf.me
+	rf.votesAcquired = 1
+	rf.persist()
+	rvargs := RequestVoteArgs{
+		Term:         rf.currentTerm,
+		CandidateId:  rf.me,
+		LastLogIndex: len(rf.log) - 1,
+		// LastLogTerm:  rf.log[len(rf.log)-1].Term,
+	}
+	if len(rf.log) > 0 {
+		rvargs.LastLogTerm = rf.log[len(rf.log)-1].Term
+	}
+	for i, _ := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+		go func(peer int) {
+			var rvreply RequestVoteReply
+			if rf.sendRequestVote(peer, rvargs, &rvreply) {
+				rf.solveVoteReply(rvreply)
+			}
+		}(i)
+	}
+}
+
+func (rf *Raft) solveTimeOut() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	switch rf.state {
+	case LEADER:
+	case CANDIDATE:
+	case FOLLOWER:
+		rf.changeToC()
+	}
+}
+
+// func (rf *Raft) initTimer() {
+// 	// timeout := time.Millisecond * time.Duration(MIN_ELECTION_INTERVAL+rand.Intn(MAX_ELECTION_INTERVAL-MIN_ELECTION_INTERVAL))
+// 	// if rf.state == LEADER {
+// 	// 	timeout = time.Millisecond * HEARTBEAT_INTERVAL
+// 	// }
+// 	timeout := properTimeDuration(rf.state)
+// 	if rf.timer == nil {
+// 		rf.timer = time.NewTimer(timeout)
+// 		go func() {
+// 			for {
+// 				<-rf.timer.C
+// 				rf.solveTimeOut()
+// 			}
+// 		}()
+// 	}
+// 	rf.timer.Reset(timeout)
+// }
+
+func properTimeDuration(state int) time.Duration {
+	if state == LEADER {
+		return time.Millisecond * HEARTBEAT_INTERVAL
+	}
+	return time.Millisecond * time.Duration(MIN_ELECTION_INTERVAL+rand.Intn(MAX_ELECTION_INTERVAL-MIN_ELECTION_INTERVAL))
 }
 
 //
@@ -264,13 +354,25 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.currentTerm = 0
 	rf.votedFor = -1
 	rf.log = make([]LogEntry, 0)
-	rf.commitIndex = 0
-	rf.lastApplied = 0
+	rf.commitIndex = -1
+	rf.lastApplied = -1
 	rf.nextIndex = make([]int, len(peers))
 	rf.matchIndex = make([]int, len(peers))
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+
+	// rf.initTimer()
+	// if rf.timer == nil {
+	rf.timer = time.NewTimer(properTimeDuration(rf.state))
+	go func() {
+		for {
+			<-rf.timer.C
+			rf.solveTimeOut()
+		}
+	}()
+	// }
+	// rf.timer.Reset(timeout)
 
 	return rf
 }
