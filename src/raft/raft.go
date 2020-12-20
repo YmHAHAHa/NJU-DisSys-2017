@@ -61,7 +61,7 @@ type LogEntry struct {
 
 //
 // A Go object implementing a single Raft peer.
-//
+// the same as struct on paper
 type Raft struct {
 	mu        sync.Mutex
 	peers     []*labrpc.ClientEnd
@@ -311,6 +311,7 @@ func (rf *Raft) CommitLog() {
 	rf.lastApplied = rf.commitIndex
 }
 
+//the same as RV
 func (rf *Raft) AppendEntry(args AppendEntryArgs, reply *AppendEntryReply) {
 	// Your code here.
 	rf.mu.Lock()
@@ -451,8 +452,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+	//DEBUG HERE
 }
 
+//follower2candidate,send requiedvote
 func (rf *Raft) changeToC() {
 	if rf.state == CANDIDATE {
 		return
@@ -486,6 +489,7 @@ func (rf *Raft) changeToC() {
 	rf.timer.Reset(properTimeDuration(rf.state))
 }
 
+//send RV in for loop
 func (rf *Raft) sendAppendEntryToFollowers() {
 	for i, _ := range rf.peers {
 		if i == rf.me {
@@ -518,6 +522,7 @@ func (rf *Raft) keepAuthority() {
 	rf.timer.Reset(properTimeDuration(rf.state))
 }
 
+//for{} in Make(), repeat many times for each raft
 func (rf *Raft) solveTimeOut() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -533,6 +538,7 @@ func (rf *Raft) solveTimeOut() {
 	}
 }
 
+//return proper timeout: leader/follower
 func properTimeDuration(state int) time.Duration {
 	if state == LEADER {
 		return time.Millisecond * HEARTBEAT_INTERVAL
