@@ -352,7 +352,7 @@ func (rf *Raft) AppendEntry(args AppendEntryArgs, reply *AppendEntryReply) {
 			//TODO:commitlog
 			go rf.CommitLog()
 		}
-		reply.CommitIndex = rf.commitIndex
+		reply.CommitIndex = args.PrevLogIndex
 		reply.Success = true
 	}
 	rf.persist()
@@ -402,7 +402,6 @@ func (rf *Raft) solveAppendEntryReply(server int, aereply AppendEntryReply) {
 		}
 	} else {
 		rf.nextIndex[server] = aereply.CommitIndex + 1
-		rf.sendAppendEntryToFollowers()
 	}
 }
 
@@ -460,6 +459,7 @@ func (rf *Raft) changeToC() {
 	if rf.state == CANDIDATE {
 		return
 	}
+
 	rf.state = CANDIDATE
 	rf.currentTerm += 1
 	rf.votedFor = rf.me
@@ -489,8 +489,11 @@ func (rf *Raft) changeToC() {
 	rf.timer.Reset(properTimeDuration(rf.state))
 }
 
-//send RV in for loop
-func (rf *Raft) sendAppendEntryToFollowers() {
+func (rf *Raft) keepAuthority() {
+	if rf.state != LEADER {
+		return
+	}
+
 	for i, _ := range rf.peers {
 		if i == rf.me {
 			continue
@@ -515,10 +518,6 @@ func (rf *Raft) sendAppendEntryToFollowers() {
 			}
 		}(i)
 	}
-}
-
-func (rf *Raft) keepAuthority() {
-	rf.sendAppendEntryToFollowers()
 	rf.timer.Reset(properTimeDuration(rf.state))
 }
 
@@ -543,7 +542,8 @@ func properTimeDuration(state int) time.Duration {
 	if state == LEADER {
 		return time.Millisecond * HEARTBEAT_INTERVAL
 	}
-	return time.Millisecond * time.Duration(MIN_ELECTION_INTERVAL+rand.Intn(MAX_ELECTION_INTERVAL-MIN_ELECTION_INTERVAL))
+	return time.Millisecond * time.Duration(
+		MIN_ELECTION_INTERVAL+rand.Intn(MAX_ELECTION_INTERVAL-MIN_ELECTION_INTERVAL))
 }
 
 //
@@ -578,18 +578,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
-	// rf.initTimer()
-	// if rf.timer == nil {
 	rf.timer = time.NewTimer(properTimeDuration(rf.state))
+	//repeat
 	go func() {
 		for {
 			<-rf.timer.C
 			rf.solveTimeOut()
 		}
 	}()
-	// }
-	// rf.timer.Reset(timeout)
 
 	return rf
 }
