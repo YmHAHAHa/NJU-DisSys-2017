@@ -270,7 +270,8 @@ func (rf *Raft) solveRequestVoteReply(rvreply RequestVoteReply) {
 			rf.matchIndex[i] = -1
 			rf.nextIndex[i] = len(rf.log)
 		}
-		rf.timer.Reset(properTimeDuration(rf.state))
+		// rf.timer.Reset(properTimeDuration(rf.state))
+		rf.keepAuthority()
 	}
 }
 
